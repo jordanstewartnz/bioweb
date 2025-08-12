@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python/
+env/
+venv/
+.venv/
+*.egg-info/
+.tox/
+.pytest_cache/
+*.log
+.ipynb_checkpoints/
+
+# Flask specific
+.flaskenv
+
+# Operating System Files
+.DS_Store
+Thumbs.db
+.localized
+
+# Data files to ignore (private)
+DOC_Bat_bioweb_data_2023.csv
+DOC_Bioweb_Herpetofauna_data_2023.csv

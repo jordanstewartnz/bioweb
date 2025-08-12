@@ -5,8 +5,9 @@ from threading import Timer
 from geopy.distance import geodesic
 import math
 from datetime import datetime
-import os # Import the os module
-import io # Import io for in-memory file handling
+import os
+import io
+import sys # Import the sys module for PyInstaller path handling
 
 # --- Global DataFrames and Initial Preprocessing ---
 bat_data_df = None
@@ -19,9 +20,19 @@ HERP_FILENAME = "DOC_Bioweb_Herpetofauna_data_2023.csv"
 
 def load_and_preprocess_data():
     global bat_data_df, herp_data_df, initial_data_load_error
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    bat_filepath = os.path.join(script_dir, BAT_FILENAME)
-    herp_filepath = os.path.join(script_dir, HERP_FILENAME)
+
+    # Determine the base directory for finding data files
+    # When running as a PyInstaller executable, sys.frozen is True and sys.argv[0] points to the executable itself.
+    # When running as a normal Python script, __file__ points to the script.
+    if getattr(sys, 'frozen', False):
+        # Running in a PyInstaller bundle, use the path of the executable
+        base_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
+    else:
+        # Running as a normal Python script
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+
+    bat_filepath = os.path.join(base_dir, BAT_FILENAME)
+    herp_filepath = os.path.join(base_dir, HERP_FILENAME)
 
     missing_files = []
     if not os.path.exists(bat_filepath):
@@ -669,7 +680,7 @@ def download_bat_data():
             "Chalinolobus tuberculatus",
             "Mystacina tuberculata",
             "Unknown bat species",
-            "No bat species detected" # Corrected 'No bat species' to 'No bat species detected'
+            "No bat species detected"
         ]
         
         # Convert 'batspecies' to a categorical type with custom order

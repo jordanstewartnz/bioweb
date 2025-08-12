@@ -1,0 +1,90 @@
+# .github/workflows/build_executables.yml
+
+# Name of your workflow, visible in GitHub Actions tab
+name: Build Executables (Windows & macOS)
+
+# When this workflow will run
+on:
+  # Trigger on pushes to the main branch
+  push:
+    branches:
+      - main
+  # Trigger when a new release is published (useful for official releases)
+  release:
+    types: [published]
+  # Allows you to manually trigger the workflow from the GitHub Actions tab
+  workflow_dispatch:
+
+# Define the jobs (sets of steps) to run
+jobs:
+  # Job to build for Windows
+  build-windows:
+    # Run on a Windows virtual machine
+    runs-on: windows-latest
+
+    steps:
+    # Step 1: Checkout your repository code
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    # Step 2: Set up Python environment
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.9' # Or specify your exact Python version if different, e.g., '3.10'
+
+    # Step 3: Install Python dependencies (PyInstaller, Flask, Pandas, Geopy)
+    # It's good practice to list all dependencies for PyInstaller
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pyinstaller pandas flask geopy
+
+    # Step 4: Build the Windows executable using PyInstaller
+    # IMPORTANT: No --add-data flags here, as CSVs are private and not bundled
+    - name: Build Windows Executable
+      run: |
+        pyinstaller --noconfirm --onefile bioweb.py
+
+    # Step 5: Upload the generated executable as an artifact
+    - name: Upload Windows Executable
+      uses: actions/upload-artifact@v4
+      with:
+        name: BioWeb-Windows-Executable
+        path: dist/bioweb.exe # Path to the generated Windows executable
+
+
+  # Job to build for macOS
+  build-macos:
+    # Run on a macOS virtual machine
+    runs-on: macos-latest
+
+    steps:
+    # Step 1: Checkout your repository code
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    # Step 2: Set up Python environment
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.9' # Or specify your exact Python version
+
+    # Step 3: Install Python dependencies
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pyinstaller pandas flask geopy
+
+    # Step 4: Build the macOS executable using PyInstaller
+    # IMPORTANT: No --add-data flags here, as CSVs are private and not bundled
+    - name: Build macOS Executable
+      run: |
+        pyinstaller --noconfirm --onefile bioweb.py
+
+    # Step 5: Upload the generated executable as an artifact
+    - name: Upload macOS Executable
+      uses: actions/upload-artifact@v4
+      with:
+        name: BioWeb-macOS-Executable
+        path: dist/bioweb # PyInstaller might generate 'bioweb' or 'bioweb.app' (folder)

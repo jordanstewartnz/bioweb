@@ -41,7 +41,7 @@ def load_and_preprocess_data():
         missing_files.append(HERP_FILENAME)
 
     if missing_files:
-        initial_data_load_error = f"Missing file(s): {', '.join(missing_files)}.<br><br>Recommendation: Please ensure '{BAT_FILENAME}' and '{HERP_FILENAME}' are in the same directory as 'bioweb.py'."
+        initial_data_load_error = f"Missing file(s): {', '.join(missing_files)}.<br><br>Recommendation: Please ensure '{BAT_FILENAME}' and '{HERP_FILENAME}' are in the same directory as 'bioweb.py'.\""
         return
 
     try:
@@ -50,7 +50,9 @@ def load_and_preprocess_data():
         # For bat data, 'x' and 'y' are consistently used and renamed to Latitude/Longitude
         temp_bat_df.rename(columns={'x': 'Longitude', 'y': 'Latitude'}, inplace=True)
         temp_bat_df['date'] = pd.to_datetime(temp_bat_df['date'], errors='coerce', dayfirst=True)
-        temp_bat_df.dropna(subset=['Latitude', 'Longitude', 'date', 'batspecies', 'roost'], inplace=True)
+        # Explicitly convert 'roost' to integer, coercing errors to NaN, then filling NaN with 0, and dropping other NaNs
+        temp_bat_df['roost'] = pd.to_numeric(temp_bat_df['roost'], errors='coerce').fillna(0).astype(int)
+        temp_bat_df.dropna(subset=['Latitude', 'Longitude', 'date', 'batspecies'], inplace=True) # 'roost' no longer needs to be in subset for dropna as its NaNs are filled
         bat_data_df = temp_bat_df
 
         # Load and preprocess Herpetofauna data
@@ -70,10 +72,23 @@ def load_and_preprocess_data():
         # Continue with other renames and cleaning
         temp_herp_df.rename(columns={'observat_2': 'date', 'scientific': 'scientific_name', 'commonname': 'common_name'}, inplace=True)
         temp_herp_df['date'] = pd.to_datetime(temp_herp_df['date'], errors='coerce', dayfirst=True)
-        temp_herp_df.dropna(subset=['Latitude', 'Longitude', 'date', 'scientific_name', 'common_name', 'sightingty'], inplace=True)
+        
+        # Process blank 'sightingty' as "Undefined" BEFORE dropping NaNs from other critical columns
+        if 'sightingty' in temp_herp_df.columns:
+            # First, convert to string and strip whitespace, then replace empty strings with pandas.NA
+            temp_herp_df['sightingty'] = temp_herp_df['sightingty'].astype(str).str.replace('"', '').str.strip()
+            temp_herp_df['sightingty'].replace('', pd.NA, inplace=True)
+            # Now fill any actual NaNs (including those created from empty strings) with 'Undefined'
+            temp_herp_df['sightingty'].fillna('Undefined', inplace=True)
+
+        # Drop NaNs from other critical columns, 'sightingty' is now robustly handled
+        temp_herp_df.dropna(subset=['Latitude', 'Longitude', 'date', 'scientific_name', 'common_name'], inplace=True)
+        
+        # Ensure other critical columns are also cleaned of quotes/strip if needed
         temp_herp_df['scientific_name'] = temp_herp_df['scientific_name'].str.replace('"', '').str.strip()
         temp_herp_df['common_name'] = temp_herp_df['common_name'].str.replace('"', '').str.strip()
-        temp_herp_df['sightingty'] = temp_herp_df['sightingty'].str.replace('"', '').str.strip()
+
+
         herp_data_df = temp_herp_df
 
     except Exception as e:
@@ -219,6 +234,12 @@ def render_html_page(bat_results=None, herp_results=None, submitted_coords="", s
             .download-section {{
                 margin-top: 1em;
                 margin-bottom: 1em;
+                display: flex; /* Use flexbox for button alignment */
+                gap: 10px;    /* Space between buttons */
+                flex-wrap: wrap; /* Allow wrapping on small screens */
+            }}
+            .download-section form {{
+                margin-bottom: 0; /* Remove extra margin from form inside download section */
             }}
 
 
@@ -283,11 +304,11 @@ def render_html_page(bat_results=None, herp_results=None, submitted_coords="", s
                         <tr>
                             <th>Species</th>
                             <th>All time nearest record</th>
-                            <th>All time nearest roost</th>
-                            <th>Nearest record 2018 to 2023</th>
-                            <th>Nearest roost 2018 to 2023</th>
                             <th>Nearest record 2013 to 2023</th>
+                            <th>Nearest record 2018 to 2023</th>
+                            <th>All time nearest roost</th>
                             <th>Nearest roost 2013 to 2023</th>
+                            <th>Nearest roost 2018 to 2023</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -297,21 +318,26 @@ def render_html_page(bat_results=None, herp_results=None, submitted_coords="", s
                     <tr>
                         <td>{row['Species']}</td>
                         <td>{row['All time nearest record']}</td>
-                        <td>{row['All time nearest roost']}</td>
-                        <td>{row['Nearest record 2018 to 2023']}</td>
-                        <td>{row['Nearest roost 2018 to 2023']}</td>
                         <td>{row['Nearest record 2013 to 2023']}</td>
+                        <td>{row['Nearest record 2018 to 2023']}</td>
+                        <td>{row['All time nearest roost']}</td>
                         <td>{row['Nearest roost 2013 to 2023']}</td>
+                        <td>{row['Nearest roost 2018 to 2023']}</td>
                     </tr>
                 """
             html += "</tbody></table>"
-            # Moved Bat Download Button here, outside main form
+            # Download buttons for bat data
             html += f'''
             <div class="download-section">
                 <form method="post" action="/download_bat_data">
                     <input type="hidden" name="coords" value="{submitted_coords}">
                     <input type="hidden" name="radius" value="{submitted_radius}">
                     <button type="submit" class="download-button">Download all occurrences within {submitted_radius} km</button>
+                </form>
+                <form method="post" action="/download_bat_summary_data">
+                    <input type="hidden" name="coords" value="{submitted_coords}">
+                    <input type="hidden" name="radius" value="{submitted_radius}">
+                    <button type="submit" class="download-button">Download Summary CSV</button>
                 </form>
             </div>
             '''
@@ -336,8 +362,8 @@ def render_html_page(bat_results=None, herp_results=None, submitted_coords="", s
                             <th>Observation Type</th>
                             <th>Most recent sighting within {submitted_radius} km</th>
                             <th>Nearest Record (all time)</th>
-                            <th>Nearest Record 2018 to 2023</th>
                             <th>Nearest Record 2013 to 2023</th>
+                            <th>Nearest Record 2018 to 2023</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -350,18 +376,23 @@ def render_html_page(bat_results=None, herp_results=None, submitted_coords="", s
                         <td>{item['observation_type_summary']}</td>
                         <td>{item['most_recent_sighting']}</td>
                         <td>{item['all_time']}</td>
-                        <td>{item['past_5_years']}</td>
                         <td>{item['past_10_years']}</td>
+                        <td>{item['past_5_years']}</td>
                     </tr>
                 """
             html += "</tbody></table>"
-            # Moved Herpetofauna Download Button here, outside main form
+            # Download buttons for herpetofauna data
             html += f'''
             <div class="download-section">
                 <form method="post" action="/download_herp_data">
                     <input type="hidden" name="coords" value="{submitted_coords}">
                     <input type="hidden" name="radius" value="{submitted_radius}">
                     <button type="submit" class="download-button">Download all occurrences within {submitted_radius} km</button>
+                </form>
+                <form method="post" action="/download_herp_summary_data">
+                    <input type="hidden" name="coords" value="{submitted_coords}">
+                    <input type="hidden" name="radius" value="{submitted_radius}">
+                    <button type="submit" class="download-button">Download Summary CSV</button>
                 </form>
             </div>
             '''
@@ -474,7 +505,9 @@ def process_bat_data(df, user_coords, radius_km):
         # Helper function to get nearest record/roost string
         def get_nearest_info(subset_df, is_roost=False, date_range_str=""):
             if is_roost:
-                subset_df = subset_df[subset_df['roost'] == 1]
+                # Ensure we are operating on a copy to avoid potential SettingWithCopyWarning
+                # and ensure the filter is applied independently.
+                subset_df = subset_df[subset_df['roost'] == 1].copy()
             if subset_df.empty:
                 return f"No {'roosts' if is_roost else 'records'} found{date_range_str}"
             
@@ -510,8 +543,25 @@ def process_bat_data(df, user_coords, radius_km):
             "Nearest record 2013 to 2023": past_10y_str,
             "Nearest roost 2013 to 2023": past_10y_roost_str
         })
+    
+    # Store the summary table in a DataFrame for easy CSV export
+    summary_df = pd.DataFrame(summary_table)
+    # Reorder columns for display and CSV export (and thus for CSV download)
+    display_summary_columns = [
+        "Species",
+        "All time nearest record",
+        "Nearest record 2013 to 2023",
+        "Nearest record 2018 to 2023",
+        "All time nearest roost",
+        "Nearest roost 2013 to 2023",
+        "Nearest roost 2018 to 2023"
+    ]
+    # Ensure all desired columns exist before selecting
+    final_summary_columns = [col for col in display_summary_columns if col in summary_df.columns]
+    summary_df = summary_df[final_summary_columns]
 
-    return {"counts": bat_counts, "summary_table": summary_table}
+
+    return {"counts": bat_counts, "summary_table": summary_table, "summary_df": summary_df}
 
 def process_herpetofauna_data(df, user_coords, radius_km):
     """Processes the herpetofauna data."""
@@ -536,15 +586,21 @@ def process_herpetofauna_data(df, user_coords, radius_km):
         
         total_count_for_species_in_radius = len(species_in_radius_df)
 
+        # Ensure sightingty is filled with 'Undefined' before counting
         observation_types = species_in_radius_df['sightingty'].value_counts()
-        observation_type_parts = [f"{sighting_type} ({count})" for sighting_type, count in observation_types.items()]
         
-        observation_type_summary = ""
-        if observation_type_parts:
-            observation_type_summary = ", ".join(observation_type_parts)
-            observation_type_summary += f"<br>&nbsp;<br><b>Total</b> ({total_count_for_species_in_radius})"
+        # For display in HTML, still create a string with total at the end, WITH HTML breaks
+        observation_type_html_summary = ""
+        if observation_types.empty: # Use observation_types directly, not observation_type_parts which might be empty
+             observation_type_html_summary = f"<b>Total</b> ({total_count_for_species_in_radius})"
         else:
-            observation_type_summary = f"<b>Total</b> ({total_count_for_species_in_radius})"
+            observation_type_parts = [f"{sighting_type} ({count})" for sighting_type, count in observation_types.items()]
+            observation_type_html_summary = ", ".join(observation_type_parts)
+            observation_type_html_summary += f"<br>&nbsp;<br><b>Total</b> ({total_count_for_species_in_radius})"
+
+        # For CSV, create a clean string without HTML tags
+        observation_type_csv_summary = ", ".join([f"{sighting_type} ({count})" for sighting_type, count in observation_types.items()])
+
 
         # All time nearest record (within radius)
         nearest_record_in_radius = species_in_radius_df.loc[species_in_radius_df['distance_km'].idxmin()]
@@ -584,7 +640,9 @@ def process_herpetofauna_data(df, user_coords, radius_km):
         herp_results.append({
             "species": species_scientific,
             "common_name": common_name,
-            "observation_type_summary": observation_type_summary,
+            "observation_type_summary": observation_type_html_summary, # For HTML display
+            "observation_type_csv_summary": observation_type_csv_summary, # For CSV export, without HTML
+            "total_observations_for_species": total_count_for_species_in_radius, # For CSV export
             "most_recent_sighting": most_recent_sighting_str,
             "all_time": all_time_str,
             "past_5_years": past_5y_str,
@@ -595,8 +653,24 @@ def process_herpetofauna_data(df, user_coords, radius_km):
         return {"message": f"No herpetofauna records found within {radius_km} km.", "unique_species_count": 0}
     elif not herp_results and unique_species_count > 0:
          return {"message": f"No herpetofauna records found within {radius_km} km.", "unique_species_count": 0}
+    
+    # Create DataFrame for herp summary table
+    summary_df = pd.DataFrame(herp_results)
+    # Reorder columns for display (HTML table)
+    display_summary_columns = [
+        "species",
+        "common_name",
+        "observation_type_summary", # Use the HTML-formatted summary for display
+        "most_recent_sighting",
+        "all_time",
+        "past_10_years", # Switched order
+        "past_5_years"   # Switched order
+    ]
+    # Ensure all desired columns exist before selecting
+    final_display_columns = [col for col in display_summary_columns if col in summary_df.columns]
+    summary_df = summary_df[final_display_columns] # This df is used for HTML table rendering
 
-    return {"results": herp_results, "unique_species_count": unique_species_count}
+    return {"results": herp_results, "unique_species_count": unique_species_count, "summary_df": summary_df}
 
 @app.route('/', methods=['GET', 'POST'])
 def index():
@@ -669,6 +743,11 @@ def download_bat_data():
         filtered_df['direction'] = filtered_df.apply(
             lambda row: calculate_direction(user_coords, (row['Latitude'], row['Longitude'])), axis=1
         )
+        
+        # Add combined Lat/Long column
+        filtered_df['Lat_Long_Combined'] = filtered_df.apply(
+            lambda row: f"{row['Latitude']}, {row['Longitude']}", axis=1
+        )
 
         # Convert 'roost' from 0/1 to False/True strings
         if 'roost' in filtered_df.columns:
@@ -694,6 +773,7 @@ def download_bat_data():
             'batspecies', 'locationna', 'roost', 'date', 'numberofpa',
             'detectorty', 'nightsout', 'surveymeth',
             'Longitude', 'Latitude',
+            'Lat_Long_Combined', # New combined column
             'distance_km', 'direction'
         ]
         
@@ -709,7 +789,7 @@ def download_bat_data():
             io.BytesIO(output.getvalue().encode('utf-8')),
             mimetype='text/csv',
             as_attachment=True,
-            download_name=f'bat_data_within_{radius_km}km.csv'
+            download_name=f'bat_data_occurrences_within_{radius_km}km.csv'
         )
     except Exception as e:
         print(f"Error during bat data download: {e}")
@@ -737,6 +817,11 @@ def download_herp_data():
             lambda row: calculate_direction(user_coords, (row['Latitude'], row['Longitude'])), axis=1
         )
 
+        # Add combined Lat/Long column
+        filtered_df['Lat_Long_Combined'] = filtered_df.apply(
+            lambda row: f"{row['Latitude']}, {row['Longitude']}", axis=1
+        )
+
         # Convert recordveri from 0/1 to False/True strings
         if 'recordveri' in filtered_df.columns:
             filtered_df['recordveri'] = filtered_df['recordveri'].map({0: 'False', 1: 'True'})
@@ -750,6 +835,7 @@ def download_herp_data():
             'scientific_name', 'common_name', 'recordveri', 'date', 'placename',
             'sightingty', 'numberofin', 'identifica', 'ageinyears',
             'Longitude', 'Latitude', # These are already renamed from x/y in preprocessing
+            'Lat_Long_Combined', # New combined column
             'distance_km', 'direction'
         ]
         
@@ -766,11 +852,109 @@ def download_herp_data():
             io.BytesIO(output.getvalue().encode('utf-8')),
             mimetype='text/csv',
             as_attachment=True,
-            download_name=f'herpetofauna_data_within_{radius_km}km.csv'
+            download_name=f'herpetofauna_data_occurrences_within_{radius_km}km.csv'
         )
     except Exception as e:
         print(f"Error during herpetofauna data download: {e}")
         return f"An error occurred during herpetofauna data download: {e}", 500
+
+@app.route('/download_bat_summary_data', methods=['POST'])
+def download_bat_summary_data():
+    if initial_data_load_error or bat_data_df is None:
+        return "Error: Data not loaded. " + (initial_data_load_error or ""), 500
+    
+    try:
+        coords_str = request.form['coords']
+        lat_str, lon_str = coords_str.split(',')
+        user_coords = (float(lat_str.strip()), float(lon_str.strip()))
+        radius_km = int(request.form['radius'])
+
+        # Recalculate bat results to get the summary_df
+        bat_results = process_bat_data(bat_data_df.copy(), user_coords, radius_km)
+        summary_df = bat_results.get('summary_df')
+
+        if summary_df is None or summary_df.empty:
+            return "No bat summary data available to download.", 404
+        
+        output = io.StringIO()
+        summary_df.to_csv(output, index=False)
+        output.seek(0)
+
+        return send_file(
+            io.BytesIO(output.getvalue().encode('utf-8')),
+            mimetype='text/csv',
+            as_attachment=True,
+            download_name=f'bat_summary_data_within_{radius_km}km.csv'
+        )
+    except Exception as e:
+        print(f"Error during bat summary data download: {e}")
+        return f"An error occurred during bat summary data download: {e}", 500
+
+@app.route('/download_herp_summary_data', methods=['POST'])
+def download_herp_summary_data():
+    if initial_data_load_error or herp_data_df is None:
+        return "Error: Data not loaded. " + (initial_data_load_error or ""), 500
+    
+    try:
+        coords_str = request.form['coords']
+        lat_str, lon_str = coords_str.split(',')
+        user_coords = (float(lat_str.strip()), float(lon_str.strip()))
+        radius_km = int(request.form['radius'])
+
+        # Recalculate herpetofauna results to get the structured data
+        herp_processed_data = process_herpetofauna_data(herp_data_df.copy(), user_coords, radius_km)
+        herp_results_list = herp_processed_data.get('results', [])
+
+        if not herp_results_list:
+            return "No herpetofauna summary data available to download.", 404
+        
+        # Prepare data for new DataFrame rows
+        summary_data_for_df = []
+        for item in herp_results_list:
+            row = {
+                "Species": item['species'],
+                "Common Name": item['common_name'],
+                # Use the clean CSV summary string here
+                "Observation Type Summary": item['observation_type_csv_summary'], 
+                "Total Observations": item['total_observations_for_species'], # This is already in the correct position from previous fix
+                "Most recent sighting within {} km".format(radius_km): item['most_recent_sighting'],
+                "Nearest Record (all time)": item['all_time'],
+                "Nearest Record 2013 to 2023": item['past_10_years'],
+                "Nearest Record 2018 to 2023": item['past_5_years']
+            }
+            summary_data_for_df.append(row)
+
+        summary_df = pd.DataFrame(summary_data_for_df)
+
+        # Define the final column order for the CSV
+        final_csv_columns = [
+            "Species",
+            "Common Name",
+            "Observation Type Summary",
+            "Total Observations", # Ensure this is in the correct position
+            "Most recent sighting within {} km".format(radius_km),
+            "Nearest Record (all time)",
+            "Nearest Record 2013 to 2023",
+            "Nearest Record 2018 to 2023"
+        ]
+        
+        # Ensure all desired columns exist before selecting
+        final_csv_columns = [col for col in final_csv_columns if col in summary_df.columns]
+        summary_df = summary_df[final_csv_columns]
+
+        output = io.StringIO()
+        summary_df.to_csv(output, index=False)
+        output.seek(0)
+
+        return send_file(
+            io.BytesIO(output.getvalue().encode('utf-8')),
+            mimetype='text/csv',
+            as_attachment=True,
+            download_name=f'herpetofauna_summary_data_within_{radius_km}km.csv'
+        )
+    except Exception as e:
+        print(f"Error during herpetofauna summary data download: {e}")
+        return f"An error occurred during herpetofauna summary data download: {e}", 500
 
 
 def open_browser():

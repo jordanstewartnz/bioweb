@@ -12,14 +12,16 @@ import sys # Import the sys module for PyInstaller path handling
 # --- Global DataFrames and Initial Preprocessing ---
 bat_data_df = None
 herp_data_df = None
+threat_status_df = None # New global DataFrame for threat status
 initial_data_load_error = None
 
 # Define the expected filenames
 BAT_FILENAME = "DOC_Bat_bioweb_data_2023.csv"
 HERP_FILENAME = "DOC_Bioweb_Herpetofauna_data_2023.csv"
+THREAT_STATUS_FILENAME = "threat_status.csv" # New threat status file
 
 def load_and_preprocess_data():
-    global bat_data_df, herp_data_df, initial_data_load_error
+    global bat_data_df, herp_data_df, threat_status_df, initial_data_load_error
 
     # Determine the base directory for finding data files
     # When running as a PyInstaller executable, sys.frozen is True and sys.argv[0] points to the executable itself.
@@ -33,15 +35,18 @@ def load_and_preprocess_data():
 
     bat_filepath = os.path.join(base_dir, BAT_FILENAME)
     herp_filepath = os.path.join(base_dir, HERP_FILENAME)
+    threat_status_filepath = os.path.join(base_dir, THREAT_STATUS_FILENAME) # Path for new CSV
 
     missing_files = []
     if not os.path.exists(bat_filepath):
         missing_files.append(BAT_FILENAME)
     if not os.path.exists(herp_filepath):
         missing_files.append(HERP_FILENAME)
+    if not os.path.exists(threat_status_filepath): # Check for new CSV
+        missing_files.append(THREAT_STATUS_FILENAME)
 
     if missing_files:
-        initial_data_load_error = f"Missing file(s): {', '.join(missing_files)}.<br><br>Recommendation: Please ensure '{BAT_FILENAME}' and '{HERP_FILENAME}' are in the same directory as 'bioweb.py'.\""
+        initial_data_load_error = f"Missing file(s): {', '.join(missing_files)}.<br><br>Recommendation: Please ensure all required CSVs are in the same directory as 'bioweb.py'."
         return
 
     try:
@@ -91,6 +96,12 @@ def load_and_preprocess_data():
 
         herp_data_df = temp_herp_df
 
+        # Load and preprocess Threat Status data
+        temp_threat_status_df = pd.read_csv(threat_status_filepath, low_memory=False)
+        # Clean 'Current Species Name' for matching
+        temp_threat_status_df['Current Species Name'] = temp_threat_status_df['Current Species Name'].str.replace('"', '').str.strip()
+        threat_status_df = temp_threat_status_df
+
     except Exception as e:
         initial_data_load_error = f"An error occurred during data loading or preprocessing: {e}"
 
@@ -103,6 +114,17 @@ def render_html_page(bat_results=None, herp_results=None, submitted_coords="", s
     """
     Generates the full HTML for the web page, embedding the results dynamically.
     """
+    # Define CSS classes for threat status highlighting
+    # Note: No background-color for 'Extinct' or 'Introduced and Naturalised'
+    CSS_CLASSES_FOR_THREAT_STATUS = {
+        'Threatened': 'threatened-bg',
+        'At Risk': 'at-risk-bg',
+        'Not Threatened': 'not-threatened-bg',
+        'Non-resident Native': 'non-resident-native-bg',
+        'Extinct': 'extinct-text-color', # Just text color, no background
+        'Unknown': 'unknown-text-color' # Light grey for unknown text color
+    }
+
     # Start of the HTML document with CSS styles
     html = f"""
     <!DOCTYPE html>
@@ -120,7 +142,7 @@ def render_html_page(bat_results=None, herp_results=None, submitted_coords="", s
                 color: #333;
             }}
             .container {{
-                max-width: 900px;
+                max-width: 1200px; /* Increased width */
                 margin: auto;
                 background: #fff;
                 padding: 2em;
@@ -192,7 +214,7 @@ def render_html_page(bat_results=None, herp_results=None, submitted_coords="", s
             table {{
                 border-collapse: separate;
                 border-spacing: 0;
-                width: 100%;
+                width: 100%; /* Ensure table takes full available width */
                 margin-top: 1em;
             }}
             th, td {{
@@ -242,7 +264,6 @@ def render_html_page(bat_results=None, herp_results=None, submitted_coords="", s
                 margin-bottom: 0; /* Remove extra margin from form inside download section */
             }}
 
-
             /* Spinner styles */
             .spinner {{
                 border: 4px solid rgba(255, 255, 255, 0.3);
@@ -259,6 +280,20 @@ def render_html_page(bat_results=None, herp_results=None, submitted_coords="", s
                 0% {{ transform: rotate(0deg); }}
                 100% {{ transform: rotate(360deg); }}
             }}
+
+            /* Threat Status Cell Styling */
+            /* Apply padding here to keep consistent cell size with other table cells */
+            .threat-status-cell {{
+                padding: 12px;
+                text-align: left; /* Ensure text alignment is consistent */
+            }}
+            .threatened-bg {{ background-color: #FFCCCC; }}     /* Light Red */
+            .at-risk-bg {{ background-color: #FFEBCC; }}        /* Light Orange */
+            .not-threatened-bg {{ background-color: #D9FFD9; }} /* Light Green */
+            .non-resident-native-bg {{ background-color: #CCEEFF; }} /* Greenish-blue turquoise */
+            .extinct-text-color {{ color: #888; background-color: transparent; }} /* Grey text, no background */
+            .unknown-text-color {{ color: #A0A0A0; background-color: transparent; }} /* Slightly darker grey for unknown */
+            /* Introduced and Naturalised will have default background (white/f9f9f9) and black text */
         </style>
     </head>
     <body>
@@ -357,8 +392,10 @@ def render_html_page(bat_results=None, herp_results=None, submitted_coords="", s
                 <table>
                     <thead>
                         <tr>
+                            <th>Taxa Group</th>
                             <th>Species</th>
                             <th>Common Name</th>
+                            <th>Threat Status</th>
                             <th>Observation Type</th>
                             <th>Most recent sighting within {submitted_radius} km</th>
                             <th>Nearest Record (all time)</th>
@@ -369,10 +406,25 @@ def render_html_page(bat_results=None, herp_results=None, submitted_coords="", s
                     <tbody>
             """
             for item in herp_results['results']:
+                # Determine the class for the threat status cell
+                category_for_class = item.get('category_for_sort', 'Unknown')
+                threat_status_cell_class = CSS_CLASSES_FOR_THREAT_STATUS.get(category_for_class, '')
+                
+                # If category is 'Introduced and Naturalised', no specific class for background/text color
+                if category_for_class == 'Introduced and Naturalised':
+                    threat_status_cell_class = ''
+                elif category_for_class == 'unknown':
+                     threat_status_cell_class = CSS_CLASSES_FOR_THREAT_STATUS.get('Unknown', '')
+
+                # Add the base class 'threat-status-cell' along with any specific highlighting class
+                cell_class_attr = f' class="threat-status-cell {threat_status_cell_class}"' if threat_status_cell_class else ' class="threat-status-cell"'
+
                 html += f"""
                     <tr>
+                        <td>{item['taxa_group']}</td>
                         <td>{item['species']}</td>
                         <td>{item['common_name']}</td>
+                        <td{cell_class_attr}>{item['threat_status_display']}</td>
                         <td>{item['observation_type_summary']}</td>
                         <td>{item['most_recent_sighting']}</td>
                         <td>{item['all_time']}</td>
@@ -579,6 +631,15 @@ def process_herpetofauna_data(df, user_coords, radius_km):
     start_date_10y_herp = pd.to_datetime('2013-01-01', utc=True)
     end_date_herp = pd.to_datetime('2023-12-31', utc=True)
 
+    # Define custom sort orders for Taxa, Category, and Status
+    taxa_order = ['Amphibian', 'Reptile', 'unknown']
+    category_order = ['Threatened', 'At Risk', 'Not Threatened', 'Non-resident Native', 'Introduced and Naturalised', 'Extinct', 'unknown'] # Changed order for Extinct
+    status_order = [
+        'Nationally Critical', 'Nationally Endangered', 'Nationally Vulnerable',
+        'Nationally Increasing', 'Declining', 'Relict', 'Uncommon', 'Recovering',
+        'Migrant', 'Vagrant', 'Coloniser', 'Introduced and Naturalised', 'Extinct', 'unknown' # Changed order for Extinct
+    ]
+
     for species_scientific in unique_species_in_radius:
         species_in_radius_df = radius_df[radius_df['scientific_name'] == species_scientific]
         
@@ -586,12 +647,35 @@ def process_herpetofauna_data(df, user_coords, radius_km):
         
         total_count_for_species_in_radius = len(species_in_radius_df)
 
+        # Get threat status information
+        threat_info = threat_status_df[threat_status_df['Current Species Name'] == species_scientific]
+        
+        taxa_group = "unknown"
+        threat_status_display = "unknown"
+        category_for_sort = "unknown"
+        status_for_sort = "unknown"
+
+        if not threat_info.empty:
+            threat_row = threat_info.iloc[0]
+            taxa_group = threat_row['Taxa']
+            category = threat_row['Category']
+            status = threat_row['Status']
+            
+            # Special handling for Threat status display string
+            if category == status:
+                threat_status_display = category
+            else:
+                threat_status_display = f"{category} - {status}"
+            
+            category_for_sort = category # Use raw category for sorting
+            status_for_sort = status # Use raw status for sorting
+
         # Ensure sightingty is filled with 'Undefined' before counting
         observation_types = species_in_radius_df['sightingty'].value_counts()
         
         # For display in HTML, still create a string with total at the end, WITH HTML breaks
         observation_type_html_summary = ""
-        if observation_types.empty: # Use observation_types directly, not observation_type_parts which might be empty
+        if observation_types.empty: 
              observation_type_html_summary = f"<b>Total</b> ({total_count_for_species_in_radius})"
         else:
             observation_type_parts = [f"{sighting_type} ({count})" for sighting_type, count in observation_types.items()]
@@ -640,6 +724,10 @@ def process_herpetofauna_data(df, user_coords, radius_km):
         herp_results.append({
             "species": species_scientific,
             "common_name": common_name,
+            "taxa_group": taxa_group, # New column
+            "threat_status_display": threat_status_display, # New column for display
+            "category_for_sort": category_for_sort, # For sorting and coloring
+            "status_for_sort": status_for_sort, # For sorting
             "observation_type_summary": observation_type_html_summary, # For HTML display
             "observation_type_csv_summary": observation_type_csv_summary, # For CSV export, without HTML
             "total_observations_for_species": total_count_for_species_in_radius, # For CSV export
@@ -654,31 +742,58 @@ def process_herpetofauna_data(df, user_coords, radius_km):
     elif not herp_results and unique_species_count > 0:
          return {"message": f"No herpetofauna records found within {radius_km} km.", "unique_species_count": 0}
     
-    # Create DataFrame for herp summary table
+    # Convert herp_results to DataFrame for sorting and final processing
     summary_df = pd.DataFrame(herp_results)
-    # Reorder columns for display (HTML table)
+
+    # Convert columns to CategoricalDtype for custom sorting
+    summary_df['taxa_group'] = pd.Categorical(summary_df['taxa_group'], categories=taxa_order, ordered=True)
+    summary_df['category_for_sort'] = pd.Categorical(summary_df['category_for_sort'], categories=category_order, ordered=True)
+    summary_df['status_for_sort'] = pd.Categorical(summary_df['status_for_sort'], categories=status_order, ordered=True)
+
+    # Apply sorting
+    summary_df = summary_df.sort_values(
+        by=['taxa_group', 'category_for_sort', 'status_for_sort', 'species'], # Added species for consistent sub-sorting
+        ascending=True
+    )
+    # Reset index after sorting
+    summary_df = summary_df.reset_index(drop=True)
+
+    # The 'results' list for HTML display should reflect this sorting
+    herp_results_sorted = summary_df.to_dict(orient='records')
+
+
+    # Reorder columns for display (HTML table).
+    # Note: 'category_for_sort' and 'status_for_sort' are internal for sorting/coloring, not for display
+    # 'observation_type_csv_summary' and 'total_observations_for_species' are for CSV, not HTML table
     display_summary_columns = [
+        "taxa_group",
         "species",
         "common_name",
+        "threat_status_display",
         "observation_type_summary", # Use the HTML-formatted summary for display
         "most_recent_sighting",
         "all_time",
-        "past_10_years", # Switched order
-        "past_5_years"   # Switched order
+        "past_10_years", 
+        "past_5_years"   
     ]
-    # Ensure all desired columns exist before selecting
+    # Filter columns to ensure they exist before selecting for the HTML display
     final_display_columns = [col for col in display_summary_columns if col in summary_df.columns]
-    summary_df = summary_df[final_display_columns] # This df is used for HTML table rendering
+    summary_df = summary_df[final_display_columns] # This df is primarily for consistent column existence check, results_sorted used for values
 
-    return {"results": herp_results, "unique_species_count": unique_species_count, "summary_df": summary_df}
+
+    return {"results": herp_results_sorted, "unique_species_count": unique_species_count, "summary_df": summary_df}
 
 @app.route('/', methods=['GET', 'POST'])
 def index():
+    # Load data only if not already loaded or if there was an initial error
+    # This prevents reloading on every POST request for data that should be static per app launch
+    # and ensures error is displayed if data files are missing at startup.
     if initial_data_load_error:
         return render_html_page(error=initial_data_load_error)
 
-    if bat_data_df is None or herp_data_df is None:
-        return render_html_page(error="Data files could not be loaded. Please check the server logs for details.")
+    if bat_data_df is None or herp_data_df is None or threat_status_df is None:
+        # This case should ideally be caught by initial_data_load_error, but as a fallback
+        return render_html_page(error="Data files could not be loaded. Please ensure all required CSVs are in the same directory as the executable.")
 
     if request.method == 'POST':
         try:
@@ -892,7 +1007,7 @@ def download_bat_summary_data():
 
 @app.route('/download_herp_summary_data', methods=['POST'])
 def download_herp_summary_data():
-    if initial_data_load_error or herp_data_df is None:
+    if initial_data_load_error or herp_data_df is None or threat_status_df is None:
         return "Error: Data not loaded. " + (initial_data_load_error or ""), 500
     
     try:
@@ -908,15 +1023,16 @@ def download_herp_summary_data():
         if not herp_results_list:
             return "No herpetofauna summary data available to download.", 404
         
-        # Prepare data for new DataFrame rows
+        # Prepare data for new DataFrame rows for CSV
         summary_data_for_df = []
         for item in herp_results_list:
             row = {
+                "Taxa Group": item['taxa_group'], # New column for CSV
                 "Species": item['species'],
                 "Common Name": item['common_name'],
-                # Use the clean CSV summary string here
+                "Threat Status": item['threat_status_display'], # New column for CSV
                 "Observation Type Summary": item['observation_type_csv_summary'], 
-                "Total Observations": item['total_observations_for_species'], # This is already in the correct position from previous fix
+                "Total Observations": item['total_observations_for_species'], 
                 "Most recent sighting within {} km".format(radius_km): item['most_recent_sighting'],
                 "Nearest Record (all time)": item['all_time'],
                 "Nearest Record 2013 to 2023": item['past_10_years'],
@@ -928,10 +1044,12 @@ def download_herp_summary_data():
 
         # Define the final column order for the CSV
         final_csv_columns = [
+            "Taxa Group", # First column in CSV
             "Species",
             "Common Name",
+            "Threat Status", # After Common Name
             "Observation Type Summary",
-            "Total Observations", # Ensure this is in the correct position
+            "Total Observations", 
             "Most recent sighting within {} km".format(radius_km),
             "Nearest Record (all time)",
             "Nearest Record 2013 to 2023",
